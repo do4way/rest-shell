@@ -2,3 +2,4 @@
 .gradle
 *.i*
 build
+*.log
