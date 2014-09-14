@@ -9,7 +9,7 @@ ext {
   slf4jVersion = "1.7.2"
   logbackVersion = "1.0.9"
 
-  springVersion = "3.2.2.RELEASE"
+  springVersion = "4.1.0.RELEASE"
   springShellVersion = "1.1.0.RELEASE"
   hateoasVersion = "0.4.0.RELEASE"
   jacksonVersion = "1.9.12"
@@ -40,8 +40,8 @@ configurations {
   compile.extendsFrom providedCompile
 }
 [compileJava, compileTestJava]*.options*.compilerArgs = ["-Xlint:none"]
-project.sourceCompatibility = 1.7
-project.targetCompatibility = 1.7
+project.sourceCompatibility = 1.8
+project.targetCompatibility = 1.8
 
 // Repositories
 repositories {
