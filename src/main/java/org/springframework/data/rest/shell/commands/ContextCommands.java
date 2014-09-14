@@ -44,8 +44,8 @@ public class ContextCommands implements CommandMarker, InitializingBean {
   private static final PropertyAccessor ENV_ACCESSOR = new EnvironmentAccessor();
   private static final Environment      ENV          = new StandardEnvironment();
 
-  final Map<String, Object> variables = new HashMap<String, Object>();
-  StandardEvaluationContext evalCtx;
+  public final Map<String, Object> variables = new HashMap<String, Object>();
+  public StandardEvaluationContext evalCtx;
 
   private final SpelExpressionParser parser              = new SpelExpressionParser();
   private final ParserContext        parserContext       = new TemplateParserContext();
