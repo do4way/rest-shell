@@ -1,6 +1,7 @@
 package com.dodopipe.rest.shell.commands;
 
 import com.dodopipe.rest.shell.RestShellContext;
+import com.dodopipe.rest.shell.utils.DiscoveryCommandHelperUtils;
 import org.codehaus.jackson.JsonParseException;
 import org.codehaus.jackson.JsonParser;
 import org.codehaus.jackson.map.JsonMappingException;
@@ -26,21 +27,23 @@ import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.shell.core.CommandMarker;
 import org.springframework.shell.core.annotation.CliCommand;
 import org.springframework.shell.core.annotation.CliOption;
+import org.springframework.shell.support.util.OsUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.DefaultResponseErrorHandler;
-import org.springframework.web.client.RequestCallback;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.io.File;
+import java.io.FileFilter;
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
 import java.net.MalformedURLException;
 import java.net.URI;
-import java.net.URLEncoder;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 
 /**
  * @author <a href="mailto:yongwei.dou@gmail.com">Yongwei Dou</a>
@@ -121,11 +124,7 @@ public class FormSubmitCommand
                                         mandatory = false,
                                         help = "The form data to use as the resource.")
                              String data,
-                             @CliOption(key = "attachmentName",
-                                        mandatory = false,
-                                        help = "")
-                             String binDataName,
-                             @CliOption(key = "attachment",
+                             @CliOption(key = "binDataFrom",
                                         mandatory = false,
                                         help = "read attachment data from a file to submit as multipart/form-data")
                              String binDataFrom,
@@ -138,13 +137,13 @@ public class FormSubmitCommand
             JsonParseException,
             JsonMappingException {
 
-        if (binDataName != null && binDataFrom == null) {
-            return "To use --binDataFrom to give a file name or folder path";
-        }
 
         try {
+
             UriComponentsBuilder ucb =
-                    createUriComponentsBuilder(path.getPath());
+                    DiscoveryCommandHelperUtils.createUriComponentsBuilder(
+                            discoveryCommands, configCmds.getBaseUri(),
+                            path.getPath());
 
             this.requestUri = ucb.build().toUri();
 
@@ -154,31 +153,30 @@ public class FormSubmitCommand
             Object jsonObj = stringToJsonObject(data);
             List<Resource> resources = readFromFileOrFolder(binDataFrom);
 
+            MediaType mediaType = MediaType.APPLICATION_FORM_URLENCODED;
             if (resources != null) {
-
-                return submitForm(jsonObj, binDataName, resources,
-                                  MediaType.MULTIPART_FORM_DATA);
+                mediaType = MediaType.MULTIPART_FORM_DATA;
             }
 
-            if (data != null) {
+            StringBuilder sb = new StringBuilder();
+            outputResponse(submitForm(jsonObj, resources, mediaType, sb), sb);
+            return sb.toString();
 
-                return submitForm(jsonObj, null, null,
-                                  MediaType.APPLICATION_FORM_URLENCODED);
-            }
         }catch (Throwable t ) {
 
             t.printStackTrace();
         }
 
         return "To specify the data to submit using --data option or " +
-                "the binary data using --binDataName and --binDataFrom";
+                "the binary data using --binDataFrom";
 
     }
 
     @SuppressWarnings("unchecked")
-    private String submitForm(Object jsonData, String binDataName,
-                              List<Resource> resources,
-                              MediaType contentType) {
+    private ResponseEntity<String> submitForm(Object jsonData,
+                                              List<Resource> resources,
+                                              MediaType contentType,
+                                              StringBuilder sb) {
 
         MultiValueMap<String, Object> formData = new LinkedMultiValueMap<>();
         if (jsonData != null) {
@@ -194,7 +192,7 @@ public class FormSubmitCommand
 
         if (resources != null) {
             for (Resource resource : resources) {
-                addToFormData(binDataName, resource, formData);
+                addToFormData(resource, formData);
             }
         }
 
@@ -211,10 +209,11 @@ public class FormSubmitCommand
 
         HttpEntity<MultiValueMap<String,Object>> requestData = new HttpEntity<>(formData, headers);
 
+        outputRequest(requestData, sb);
 
-        ResponseEntity<String> response = restTemplate.postForEntity(this.requestUri, formData, String.class);
+        return restTemplate.postForEntity(this.requestUri, requestData,
+                                          String.class);
 
-        return response.getBody();
     }
 
 
@@ -224,8 +223,6 @@ public class FormSubmitCommand
         if (map == null) {
             return;
         }
-
-        map.forEach((key,value) -> System.out.println(key));
 
         map.forEach((key, value) -> {
             if (key instanceof String) {
@@ -237,10 +234,10 @@ public class FormSubmitCommand
 
     }
 
-    private void addToFormData(String binDataName, Resource resource,
+    private void addToFormData(Resource resource,
                                MultiValueMap<String, Object> formData) {
 
-        formData.add(binDataName, resource);
+        formData.add(resource.getFilename(), resource);
     }
 
 
@@ -294,11 +291,34 @@ public class FormSubmitCommand
         if (null == fileOrFolderPath) {
             return null;
         }
+
+        FileFilter ff = new FileFilter() {
+
+            @Override
+            public boolean accept(File pathname) {
+
+                if (pathname.isDirectory()) {
+                    return true;
+                }
+
+                String ext = getExtension(pathname);
+
+                if (ext != null) {
+                    return (ext.equals("tiff") || ext.equals("tif") ||
+                            ext.equals("gif") || ext.equals("jpeg") ||
+                            ext.equals("jpg") || ext.equals("png"));
+                }
+
+                return false;
+
+            }
+        };
+
         File file = new File(fileOrFolderPath);
 
         List<Resource> resources = new ArrayList<>();
         if (file.isDirectory()) {
-            File[] filesInFolder = file.listFiles();
+            File[] filesInFolder = file.listFiles(ff);
 
             if (filesInFolder != null) {
                 for (int i = 0, c = filesInFolder.length; i < c; i++) {
@@ -314,79 +334,67 @@ public class FormSubmitCommand
         return resources;
     }
 
+    private <T> void outputRequest(HttpEntity<T> request, StringBuilder sb) {
 
-    private String objToUrlEncodedForm(Object obj) throws IOException {
 
-        if (obj instanceof Map) {
-            return mapToURLEncodedForm((Map) obj);
-        }
-        if (obj instanceof List) {
-            StringBuilder sb = new StringBuilder();
-            for (Iterator ite = ((List) obj).iterator(); ite.hasNext(); ) {
-                Map m = (Map) ite.next();
-                sb.append(mapToURLEncodedForm(m));
-                if (ite.hasNext()) {
-                    sb.append("&");
+        sb.append("> ")
+          .append(this.requestUri)
+          .append(OsUtils.LINE_SEPARATOR)
+          .append("> ")
+          .append(request.getHeaders().getContentType())
+          .append(OsUtils.LINE_SEPARATOR)
+          .append(OsUtils.LINE_SEPARATOR);
+
+
+    }
+
+    private void outputResponse(ResponseEntity<String> response,
+                                StringBuilder buffer) {
+
+        buffer.append("< ")
+              .append(response.getStatusCode().value())
+              .append(" ")
+              .append(response.getStatusCode().name())
+              .append(OsUtils.LINE_SEPARATOR);
+        for (Map.Entry<String, List<String>> entry : response.getHeaders()
+                                                             .entrySet()) {
+            buffer.append("< ")
+                  .append(entry.getKey())
+                  .append(": ");
+            boolean first = true;
+            for (String s : entry.getValue()) {
+                if (!first) {
+                    buffer.append(",");
+                } else {
+                    first = false;
                 }
+                buffer.append(s);
             }
-            return sb.toString();
-
+            buffer.append(OsUtils.LINE_SEPARATOR);
         }
-        throw new IllegalArgumentException("Not a valid json object");
+        buffer.append("< ").append(OsUtils.LINE_SEPARATOR);
+        if (null != response.getBody()) {
+            final org.springframework.data.rest.shell.formatter.Formatter
+                    formatter = formatProvider.getFormatter(
+                    response.getHeaders().getContentType().getSubtype());
+            buffer.append(formatter.format(response.getBody()));
+        }
     }
 
-    private String mapToURLEncodedForm(Map map) {
+    private String getExtension(File file) {
 
-        StringBuilder sb = new StringBuilder();
-        for (Iterator keySet = map.keySet().iterator(); keySet.hasNext(); ) {
-
-            Object key = keySet.next();
-            sb.append(key.toString())
-              .append("=")
-              .append(encode(map.get(key)
-                                .toString()));
-
-            if (keySet.hasNext()) {
-
-                sb.append("&");
-            }
-        }
-        return sb.toString();
-    }
-
-
-    private UriComponentsBuilder createUriComponentsBuilder(String path) {
-
-        UriComponentsBuilder ucb;
-
-        if (discoveryCommands.getResources()
-                             .containsKey(path)) {
-            ucb =
-                    UriComponentsBuilder.fromUriString(
-                            discoveryCommands.getResources()
-                                             .get(path));
-        } else {
-            if (path.startsWith("http")) {
-                ucb = UriComponentsBuilder.fromUriString(path);
-            } else {
-                ucb = UriComponentsBuilder.fromUri(configCmds.getBaseUri())
-                                          .pathSegment(path);
-            }
-
+        String filename = file.getName();
+        if ( filename == null ) {
+            return null;
         }
 
-        return ucb;
-
-    }
-
-    private static String encode(String s) {
-
-        try {
-            return URLEncoder.encode(s,
-                                     "UTF-8");
-        } catch (UnsupportedEncodingException e) {
-            throw new IllegalStateException(e);
+        int pos = filename.lastIndexOf(".");
+        if (pos < 0) {
+            return null;
         }
+
+        return filename.substring(pos + 1).toLowerCase();
+
     }
 
 }
