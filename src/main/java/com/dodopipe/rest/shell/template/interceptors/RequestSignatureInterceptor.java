@@ -20,6 +20,9 @@ import java.security.InvalidKeyException;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
+import org.apache.commons.codec.binary.Base64;
+
+
 /**
  * @author <a href="mailto:yongwei.dou@gmail.com">Yongwei Dou</a>
  */
@@ -172,15 +175,13 @@ public class RequestSignatureInterceptor
 
         if ( data == null )
             return null;
-        return Base64.getEncoder()
-                     .encodeToString(data);
+        return Base64.encodeBase64String(data);
 
     }
 
     private static byte[] base64Decode(String secretKey) {
 
-        return Base64.getDecoder()
-                     .decode(secretKey);
+        return Base64.decodeBase64(secretKey);
     }
 
 }
